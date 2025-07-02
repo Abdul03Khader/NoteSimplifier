@@ -29,6 +29,9 @@ export async function extractTextFromPDF(file: File): Promise<string> {
 
 export async function generatePDFFromText(text: string, filename: string): Promise<Blob> {
   try {
+    // Replace tab characters with spaces to avoid WinAnsi encoding errors
+    const cleanedText = text.replace(/\t/g, '    ');
+    
     const pdfDoc = await PDFDocument.create();
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const fontSize = 12;
@@ -39,7 +42,7 @@ export async function generatePDFFromText(text: string, filename: string): Promi
     const textWidth = pageWidth - 2 * margin;
 
     // First, split text into paragraphs by newlines
-    const paragraphs = text.split(/\r?\n/);
+    const paragraphs = cleanedText.split(/\r?\n/);
     const lines: string[] = [];
 
     // Process each paragraph separately
