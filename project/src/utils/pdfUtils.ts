@@ -29,11 +29,16 @@ export async function extractTextFromPDF(file: File): Promise<string> {
 
 export async function generatePDFFromText(text: string, filename: string): Promise<Blob> {
   try {
-    // Replace tab characters with spaces to avoid WinAnsi encoding errors
-    const cleanedText = text.replace(/\t/g, '    ');
+    // Clean text to handle problematic characters
+    const cleanedText = text
+      .replace(/\t/g, '    ') // Replace tabs with spaces
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remove control characters
+      .replace(/[^\x20-\x7E\u00A0-\u024F\u1E00-\u1EFF\u0370-\u03FF\u0400-\u04FF]/g, '?'); // Replace unsupported Unicode with ?
     
     const pdfDoc = await PDFDocument.create();
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    
+    // Use TimesRoman which has better Unicode support than Helvetica
+    const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
     const fontSize = 12;
     const lineHeight = fontSize * 1.2;
     const margin = 50;
@@ -59,17 +64,36 @@ export async function generatePDFFromText(text: string, filename: string): Promi
 
       for (const word of words) {
         const testLine = currentLine ? `${currentLine} ${word}` : word;
-        const textWidthTest = font.widthOfTextAtSize(testLine, fontSize);
         
-        if (textWidthTest <= textWidth) {
-          currentLine = testLine;
-        } else {
-          if (currentLine) {
-            lines.push(currentLine);
-            currentLine = word;
+        // Use a try-catch to handle any remaining encoding issues
+        try {
+          const textWidthTest = font.widthOfTextAtSize(testLine, fontSize);
+          
+          if (textWidthTest <= textWidth) {
+            currentLine = testLine;
           } else {
-            // Handle very long words
-            lines.push(word);
+            if (currentLine) {
+              lines.push(currentLine);
+              currentLine = word;
+            } else {
+              // Handle very long words
+              lines.push(word);
+            }
+          }
+        } catch (encodingError) {
+          // If there's still an encoding error, replace problematic characters
+          const safeLine = testLine.replace(/[^\x20-\x7E]/g, '?');
+          const textWidthTest = font.widthOfTextAtSize(safeLine, fontSize);
+          
+          if (textWidthTest <= textWidth) {
+            currentLine = safeLine;
+          } else {
+            if (currentLine) {
+              lines.push(currentLine);
+              currentLine = word.replace(/[^\x20-\x7E]/g, '?');
+            } else {
+              lines.push(word.replace(/[^\x20-\x7E]/g, '?'));
+            }
           }
         }
       }
@@ -88,15 +112,27 @@ export async function generatePDFFromText(text: string, filename: string): Promi
         yPosition = pageHeight - margin;
       }
 
-      // Only draw non-empty lines to avoid encoding issues
+      // Only draw non-empty lines and handle any remaining encoding issues
       if (line.trim() !== '') {
-        page.drawText(line, {
-          x: margin,
-          y: yPosition,
-          size: fontSize,
-          font,
-          color: rgb(0, 0, 0),
-        });
+        try {
+          page.drawText(line, {
+            x: margin,
+            y: yPosition,
+            size: fontSize,
+            font,
+            color: rgb(0, 0, 0),
+          });
+        } catch (drawError) {
+          // If drawing fails, try with ASCII-only version
+          const asciiLine = line.replace(/[^\x20-\x7E]/g, '?');
+          page.drawText(asciiLine, {
+            x: margin,
+            y: yPosition,
+            size: fontSize,
+            font,
+            color: rgb(0, 0, 0),
+          });
+        }
       }
 
       yPosition -= lineHeight;
